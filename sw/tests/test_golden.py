@@ -11,7 +11,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import golden  # noqa: E402
-import vasm    # noqa: E402
+
+# Some checks assemble a program, so they wait until the assembler and the
+# programs are in the repository.
+try:
+    import vasm  # noqa: E402
+except ImportError:
+    vasm = None
+VADD = Path(__file__).resolve().parents[1] / "programs" / "vadd.s"
+needs_assembler = unittest.skipIf(vasm is None or not VADD.exists(),
+                                  "needs sw/vasm.py and sw/programs/vadd.s")
 
 
 class GoldenModelTests(unittest.TestCase):
@@ -25,13 +34,15 @@ class GoldenModelTests(unittest.TestCase):
         self.assertEqual(golden.alu(sltu, 0xFFFF, 1), 0)         # 65535 > 1
         self.assertEqual(golden.alu(mul, 300, 300), 90000 & 0xFFFF)
 
+    @needs_assembler
     def test_s0_stays_zero(self):
         model = golden.SimdModel(lanes=1)
         model.run(vasm.assemble("ADDI s0, s0, 5\nHALT"))
         self.assertEqual(model.s[0], 0)
 
+    @needs_assembler
     def test_vadd_program(self):
-        source = (Path(__file__).resolve().parents[1] / "programs" / "vadd.s").read_text()
+        source = VADD.read_text()
         for lanes in (1, 8):
             model = golden.SimdModel(lanes)
             a, b = list(range(16)), list(range(100, 116))
