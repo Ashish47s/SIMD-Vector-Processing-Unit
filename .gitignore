@@ -1,0 +1,20 @@
+# Build outputs (simulation, synthesis, waveforms)
+build/
+*.vvp
+*.vcd
+*.fst
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# LaTeX intermediates (the final PDF lives in reports/)
+reports/src/*.pdf
+reports/src/*.aux
+reports/src/*.log
+reports/src/*.out
+
+# OS / editors
+.DS_Store
+.vscode/
