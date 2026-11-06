@@ -49,9 +49,9 @@ As a result, the cycle count of a program is exact and simple to predict: **cycl
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `LANES` | 8 | lanes working in parallel (1, 2, 4 or 8 are tested) |
-| `W` | 16 | bits per element |
+| `W` | 16 | bits per element; a power of two below 32 (8 or 16), because shifts use `b mod W` and sums are 32 bits wide |
 | `IADDR_W` | 8 | instruction memory size, 2^8 = 256 instructions |
-| `DADDR_W` | 10 in simulation, 8 on the FPGA | data memory size, in 128-bit words |
+| `DADDR_W` | 10 in simulation, 9 on the FPGA | data memory size: 1,024 or 512 words of `LANES*W` bits |
 
 ## Design choices
 
