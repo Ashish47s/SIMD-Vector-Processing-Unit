@@ -9,7 +9,7 @@
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-57606a?labelColor=24292f&style=flat-square)](LICENSE)
 ![Phase 1: prototype](https://img.shields.io/badge/phase%201-prototype-1a7f5a?labelColor=24292f&style=flat-square)
 
-A parameterised SIMD vector processing unit in Verilog: eight 16-bit lanes, a 22-instruction ISA, cycle-exact verification against a Python golden model, and a measured scalar-versus-SIMD comparison on FPGA.
+A parameterised SIMD vector processing unit in Verilog: eight 16-bit lanes, a 48-instruction ISA (14 ALU jobs in three forms, plus 6 for memory and control), cycle-exact verification against a Python golden model, and a measured scalar-versus-SIMD comparison on FPGA.
 
 ## Overview
 
@@ -43,7 +43,7 @@ This project builds such a unit, checks it thoroughly, and measures what it gain
 - **128-bit vectors**: the width of Intel SSE and ARM NEON.
 - **Compares write all-ones masks**, so an `if` can run without a branch.
 
-Full walkthrough: [`docs/architecture.md`](docs/architecture.md) · instruction set: [`docs/isa.md`](docs/isa.md)
+Full walkthrough: [`docs/architecture.md`](docs/architecture.md) · instruction set: [`docs/isa.md`](docs/isa.md) · block notes: [ALUs](docs/alu.md), [register files](docs/register_files.md), [lane MUX and combiner](docs/lane_mux_and_combiner.md)
 
 ```asm
 loop:   VLD  v1, A(s1)        # load 8 elements of A
@@ -79,15 +79,15 @@ Each kernel processes N = 256 sixteen-bit elements. Every cycle count below was 
 
 | Lanes | Logic cells | Multipliers | Block RAM | Fmax (median of 3 seeds) |
 | --- | --- | --- | --- | --- |
-| 1 | 921 (3.8%) | 1 | 2 | 50.8 MHz |
-| 2 | 1,604 (6.6%) | 2 | 2 | 42.5 MHz |
-| 4 | 2,851 (11.7%) | 4 | 3 | 37.5 MHz |
-| 8 | 4,418 (18.2%) | 8 | 5 | 33.9 MHz |
+| 1 | 949 (3.9%) | 1 | 2 | 50.8 MHz |
+| 2 | 1,636 (6.7%) | 2 | 2 | 41.4 MHz |
+| 4 | 2,865 (11.8%) | 4 | 3 | 37.1 MHz |
+| 8 | 4,650 (19.1%) | 8 | 5 | 33.6 MHz |
 
-- **Cost.** Each lane adds one hardware multiplier and about 500 logic cells. Eight lanes cost 4.8× the logic of one, because control, scalar registers and memories are shared.
-- **Clock.** The single-cycle datapath gets longer with more lanes, so Fmax drops from 50.8 to 33.9 MHz.
-- **Real speed-up.** 7.89 × (33.9 / 50.8) = **5.3×** faster in wall-clock time at 8 lanes. Pipelining (Phase 2) targets the lost clock speed.
-- **Artix-7 (Basys-3) estimate.** 3,698 LUTs (18%) and 9 DSP48 for 8 lanes. Details and the Vivado flow: [`syn/`](syn).
+- **Cost.** Each lane adds one hardware multiplier and about 530 logic cells on average. Eight lanes cost 4.9× the logic of one, because control, scalar registers and memories are shared.
+- **Clock.** The single-cycle datapath gets longer with more lanes, so Fmax drops from 50.8 to 33.6 MHz.
+- **Real speed-up.** 7.89 × (33.6 / 50.8) = **5.2×** faster in wall-clock time at 8 lanes. Pipelining (Phase 2) targets the lost clock speed.
+- **Artix-7 (Basys-3) estimate.** 3,704 LUTs (18%) and 9 DSP48 for 8 lanes. Details and the Vivado flow: [`syn/`](syn).
 
 <p align="center"><img src="results/figures/fpga_scaling.png" width="620" alt="Logic cells and maximum clock frequency against lane count"></p>
 
@@ -99,7 +99,9 @@ Each kernel processes N = 256 sixteen-bit elements. Every cycle count below was 
 | Register files | both ports, write enable, read-during-write, `s0 = 0`, debug port, random | 10,044 checks, 0 errors |
 | Lane MUX + combiner | broadcast, adder tree vs plain loop, extremes; 1, 2, 4 and 8 lanes | 44,032 checks, 0 errors |
 | Full system | 6 programs × 4 lane counts: every memory word, register, instruction and cycle count | 24 / 24 runs match |
-| Mutation tests | injected bugs in the ALU, adder tree and load timing | all caught |
+| Directed corner tests | writes to `s0`, address and PC wrap-around, back-to-back loads, a branch into a load, wide broadcast, every unused op code; 4 lane counts | 8 / 8 runs match |
+| Board version | `fpga_top` with its block RAM, started by its power-on reset alone; 4 lane counts | correct dot product on the LEDs |
+| Mutation tests | injected bugs in the ALU, adder tree, sign extension and load timing | all caught |
 
 The test plan is in [`tb/README.md`](tb/README.md).
 
@@ -134,15 +136,6 @@ SIMD-Vector-Processing-Unit/
 └── Makefile              make test | perf | syn | plots | report
 ```
 
-## Team
-
-| Member | GitHub | Part |
-| --- | --- | --- |
-| Mahir (lead) | [@mahir-m01](https://github.com/mahir-m01) | Architecture and ISA, vector control unit, core integration, system testbench, CI, report |
-| Krishiv Gupta | [@krishiv274](https://github.com/krishiv274) | Lane ALU and parallel ALU array, ALU testbench ([docs](docs/alu.md)) |
-| Abhiman Singh | [@Koray-afk](https://github.com/Koray-afk) | Vector and scalar register files, register-file testbench ([docs](docs/register_files.md)) |
-| Jayadeep | [@Jayaadeep](https://github.com/Jayaadeep) | Lane MUX and result combiner, FPGA synthesis flow ([docs](docs/lane_mux_and_combiner.md), [syn](syn)) |
-| Ashish Kushwaha | [@Ashish47s](https://github.com/Ashish47s) | Assembler, golden model, workloads, scalar-vs-SIMD analysis ([sw](sw)) |
 
 ## Report and video
 
