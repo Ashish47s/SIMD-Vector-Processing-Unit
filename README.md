@@ -43,7 +43,7 @@ This project builds such a unit, checks it thoroughly, and measures what it gain
 - **128-bit vectors**: the width of Intel SSE and ARM NEON.
 - **Compares write all-ones masks**, so an `if` can run without a branch.
 
-Full walkthrough: [`docs/architecture.md`](docs/architecture.md) · instruction set: [`docs/isa.md`](docs/isa.md)
+Full walkthrough: [`docs/architecture.md`](docs/architecture.md) · instruction set: [`docs/isa.md`](docs/isa.md) · block notes: [ALUs](docs/alu.md), [register files](docs/register_files.md), [lane MUX and combiner](docs/lane_mux_and_combiner.md)
 
 ```asm
 loop:   VLD  v1, A(s1)        # load 8 elements of A
@@ -94,15 +94,6 @@ SIMD-Vector-Processing-Unit/
 └── Makefile              make test | perf | syn | plots | report
 ```
 
-## Team
-
-| Member | GitHub | Part |
-| --- | --- | --- |
-| Mahir (lead) | [@mahir-m01](https://github.com/mahir-m01) | Architecture and ISA, vector control unit, core integration, system testbench, CI, report |
-| Krishiv Gupta | [@krishiv274](https://github.com/krishiv274) | Lane ALU and parallel ALU array, ALU testbench ([docs](docs/alu.md)) |
-| Abhiman Singh | [@Koray-afk](https://github.com/Koray-afk) | Vector and scalar register files, register-file testbench ([docs](docs/register_files.md)) |
-| Jayadeep | [@Jayaadeep](https://github.com/Jayaadeep) | Lane MUX and result combiner, FPGA synthesis flow ([docs](docs/lane_mux_and_combiner.md), [syn](syn)) |
-| Ashish Kushwaha | [@Ashish47s](https://github.com/Ashish47s) | Assembler, golden model, workloads, scalar-vs-SIMD analysis ([sw](sw)) |
 
 ## Roadmap
 
