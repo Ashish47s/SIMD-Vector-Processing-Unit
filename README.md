@@ -9,7 +9,7 @@
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-57606a?labelColor=24292f&style=flat-square)](LICENSE)
 ![Phase 1: prototype](https://img.shields.io/badge/phase%201-prototype-1a7f5a?labelColor=24292f&style=flat-square)
 
-A parameterised SIMD vector processing unit in Verilog: eight 16-bit lanes, a 22-instruction ISA, cycle-exact verification against a Python golden model, and a scalar-versus-SIMD comparison on FPGA.
+A parameterised SIMD vector processing unit in Verilog: eight 16-bit lanes, a 48-instruction ISA (14 ALU jobs in three forms, plus 6 for memory and control), cycle-exact verification against a Python golden model, and a scalar-versus-SIMD comparison on FPGA.
 
 ## Overview
 
