@@ -9,7 +9,7 @@
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-57606a?labelColor=24292f&style=flat-square)](LICENSE)
 ![Phase 1: prototype](https://img.shields.io/badge/phase%201-prototype-1a7f5a?labelColor=24292f&style=flat-square)
 
-A parameterised SIMD vector processing unit in Verilog: eight 16-bit lanes, a 22-instruction ISA, cycle-exact verification against a Python golden model, and a scalar-versus-SIMD comparison on FPGA.
+A parameterised SIMD vector processing unit in Verilog: eight 16-bit lanes, a 22-instruction ISA, cycle-exact verification against a Python golden model, and a measured scalar-versus-SIMD comparison on FPGA.
 
 ## Overview
 
@@ -54,29 +54,69 @@ loop:   VLD  v1, A(s1)        # load 8 elements of A
         BNE  s1, s2, loop
 ```
 
-## Status
+## Phase 1 results
 
-Phase 1 is being built block by block. Each block has an issue with its interface, checklist and definition of done; see the [issues](https://github.com/mahir-m01/SIMD-Vector-Processing-Unit/issues). Every pull request runs lint and all tests that exist so far.
+The full write-up is the [Phase 1 report](reports/Phase1_Report.pdf); [`reports/references.md`](reports/references.md) lists the papers it builds on.
 
-| Part | Status |
-| --- | --- |
-| Architecture, ISA, shared definitions, CI | done |
-| Lane ALU and parallel ALU array | in progress |
-| Vector and scalar register files | in progress |
-| Lane MUX and result combiner | in progress |
-| Assembler, golden model and workloads | in progress |
-| Control unit, core integration, system testbench | in progress |
-| FPGA synthesis, scalar-vs-SIMD analysis, report | planned |
+### Scalar versus SIMD
 
-## Building and testing
+Each kernel processes N = 256 sixteen-bit elements. Every cycle count below was measured on the RTL and matches the golden model's prediction exactly.
 
-Requires [Icarus Verilog](https://steveicarus.github.io/iverilog/), [Verilator](https://www.veripool.org/verilator/) and Python 3.10+.
+| Kernel | What it computes | 1 lane | 2 lanes | 4 lanes | 8 lanes | Speed-up |
+| --- | --- | --- | --- | --- | --- | --- |
+| vadd | `C = A + B` | 2,051 | 1,027 | 515 | 259 | **7.92×** |
+| saxpy | `Y = a·X + Y` | 2,308 | 1,156 | 580 | 292 | **7.90×** |
+| relu | `Y = max(X, 0)` | 1,539 | 771 | 387 | 195 | **7.89×** |
+| threshold | `Y = X if X ≥ T else 0` | 2,053 | 1,029 | 517 | 261 | **7.87×** |
+| dot | `Σ A·B` | 2,052 | 1,028 | 516 | 260 | **7.89×** |
+
+- **Near-ideal in cycles.** Eight lanes need 7.87–7.92× fewer cycles. The small gap is the few set-up instructions and `HALT`, which run once whatever the lane count (Amdahl's law).
+- **Throughput.** Vector add moves from 0.12 to 0.99 elements per cycle.
+
+<p align="center"><img src="results/figures/speedup.png" width="620" alt="Speed-up against lane count, in cycles and in real time"></p>
+
+### FPGA: Lattice ECP5-25F after place-and-route
+
+| Lanes | Logic cells | Multipliers | Block RAM | Fmax (median of 3 seeds) |
+| --- | --- | --- | --- | --- |
+| 1 | 921 (3.8%) | 1 | 2 | 50.8 MHz |
+| 2 | 1,604 (6.6%) | 2 | 2 | 42.5 MHz |
+| 4 | 2,851 (11.7%) | 4 | 3 | 37.5 MHz |
+| 8 | 4,418 (18.2%) | 8 | 5 | 33.9 MHz |
+
+- **Cost.** Each lane adds one hardware multiplier and about 500 logic cells. Eight lanes cost 4.8× the logic of one, because control, scalar registers and memories are shared.
+- **Clock.** The single-cycle datapath gets longer with more lanes, so Fmax drops from 50.8 to 33.9 MHz.
+- **Real speed-up.** 7.89 × (33.9 / 50.8) = **5.3×** faster in wall-clock time at 8 lanes. Pipelining (Phase 2) targets the lost clock speed.
+- **Artix-7 (Basys-3) estimate.** 3,698 LUTs (18%) and 9 DSP48 for 8 lanes. Details and the Vivado flow: [`syn/`](syn).
+
+<p align="center"><img src="results/figures/fpga_scaling.png" width="620" alt="Logic cells and maximum clock frequency against lane count"></p>
+
+### Verification
+
+| Level | What is checked | Result |
+| --- | --- | --- |
+| Lane ALU | 14 operations × corner values, every shift amount, carry isolation, 2,000 random vectors per op | 225,496 lane checks, 0 errors |
+| Register files | both ports, write enable, read-during-write, `s0 = 0`, debug port, random | 10,044 checks, 0 errors |
+| Lane MUX + combiner | broadcast, adder tree vs plain loop, extremes; 1, 2, 4 and 8 lanes | 44,032 checks, 0 errors |
+| Full system | 6 programs × 4 lane counts: every memory word, register, instruction and cycle count | 24 / 24 runs match |
+| Mutation tests | injected bugs in the ALU, adder tree and load timing | all caught |
+
+The test plan is in [`tb/README.md`](tb/README.md).
+
+## Reproducing the results
+
+Requires [Icarus Verilog](https://steveicarus.github.io/iverilog/), [Verilator](https://www.veripool.org/verilator/) and Python 3.10+. Synthesis also needs [Yosys](https://github.com/YosysHQ/yosys) and nextpnr-ecp5 (`pip install yowasp-nextpnr-ecp5`). The figures need [uv](https://github.com/astral-sh/uv).
 
 ```bash
-brew install icarus-verilog verilator      # macOS; on Ubuntu: apt install iverilog verilator
-make lint      # Verilator -Wall on every module
-make test      # every testbench and check that exists so far
+brew install icarus-verilog verilator yosys      # macOS; on Ubuntu: apt install iverilog verilator yosys
+make test      # lint, unit testbenches, Python checks, full-system runs (a few seconds)
+make perf      # scalar vs SIMD for 1, 2, 4, 8 lanes      -> results/perf.csv
+make syn       # ECP5 place-and-route + Artix-7 estimate  -> results/fpga_*.csv (about 3 min)
+make plots     # results/figures/*.png
+make report    # reports/Phase1_Report.pdf (needs tectonic)
 ```
+
+To view waveforms: `python3 sw/run_workloads.py --workloads vadd --vcd`, then open `build/sim/vadd_L8/wave.vcd` in GTKWave or [Surfer](https://surfer-project.org).
 
 ## Repository structure
 
@@ -104,12 +144,27 @@ SIMD-Vector-Processing-Unit/
 | Jayadeep | [@Jayaadeep](https://github.com/Jayaadeep) | Lane MUX and result combiner, FPGA synthesis flow ([docs](docs/lane_mux_and_combiner.md), [syn](syn)) |
 | Ashish Kushwaha | [@Ashish47s](https://github.com/Ashish47s) | Assembler, golden model, workloads, scalar-vs-SIMD analysis ([sw](sw)) |
 
+## Report and video
+
+- **Phase 1 report:** [`reports/Phase1_Report.pdf`](reports/Phase1_Report.pdf) (IEEE format; LaTeX source in [`reports/src`](reports/src))
+- **Prototype video:** link will be added here after recording
+
 ## Roadmap
 
 | Phase | Focus |
 | --- | --- |
-| Phase 1 | RTL, verification, scalar-vs-SIMD cycle comparison, ECP5 resources and Fmax |
+| Phase 1 (done) | RTL, verification, scalar-vs-SIMD cycle comparison, ECP5 resources and Fmax |
 | Phase 2 | Pipelined core for higher Fmax; exact Vivado results and a Basys-3 board run; masked (predicated) execution and saturating arithmetic; speed-up against problem size; power estimates; final report |
+
+## References
+
+Key works this project builds on (full list in [`reports/references.md`](reports/references.md)):
+
+> Flynn, M. J. (1972). Some computer organizations and their effectiveness. *IEEE Transactions on Computers*, C-21(9), 948–960.
+
+> Yiannacouras, P., Steffan, J. G., and Rose, J. (2008). VESPA: Portable, scalable, and flexible FPGA-based vector processors. *Proc. CASES*, 61–70.
+
+> Cavalcante, M., Schuiki, F., Zaruba, F., Schaffner, M., and Benini, L. (2020). Ara: A 1-GHz+ scalable and energy-efficient RISC-V vector processor. *IEEE Transactions on VLSI Systems*, 28(2), 530–543.
 
 ## Acknowledgements
 
