@@ -49,9 +49,9 @@ timing rules. A Python golden model, unit and system testbenches and mutation
 tests verify the design. All six test programs match the model exactly in
 memory, registers and cycle count for 1, 2, 4 and 8 lanes. On five benchmark
 kernels, eight lanes need $7.87$--$7.92\times$ fewer clock cycles than one. After
-place-and-route on a Lattice ECP5-25F, the 8-lane unit uses 18\% of the logic and
-closes timing at \SI{33.9}{MHz}, against \SI{50.8}{MHz} for one lane, giving a
-wall-clock speed-up of $5.3\times$.
+place-and-route on a Lattice ECP5-25F, the 8-lane unit uses 19\% of the logic and
+closes timing at \SI{33.6}{MHz}, against \SI{50.8}{MHz} for one lane, giving a
+wall-clock speed-up of $5.2\times$.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -83,7 +83,8 @@ The Phase~I contributions are:
 \item a synthesizable, lane-parameterised SIMD unit in Verilog with the blocks named
       in the project brief: vector register file, parallel ALUs, vector control unit,
       lane multiplexers, result combiner and a scalar interface (Section~\ref{sec:design});
-\item a 22-instruction ISA, an assembler and an instruction-level golden model that
+\item a 48-instruction ISA (14 ALU operations in three forms plus six
+      others), an assembler and an instruction-level golden model that
       predicts results and exact cycle counts (Section~\ref{sec:isa});
 \item a layered verification flow with self-checking testbenches, coverage counters
       and mutation tests (Section~\ref{sec:verif});
@@ -122,6 +123,36 @@ standardises a length-agnostic vector ISA. Ara~\cite{ara} implements it with
 identical lanes, each holding a slice of the vector register file, and reaches over
 \SI{1}{GHz} in 22-nm technology. The lane-replication scheme used in this project
 follows the same idea at a much smaller scale.
+
+\subsection{Current SIMD instruction sets}
+Table~\ref{tab:isas} compares this unit with SIMD instruction sets in use today.
+Intel SSE2 and AVX2~\cite{intelsdm}, Arm Neon~\cite{armarm} and the MIPS SIMD
+Architecture (MSA)~\cite{msa} fix the register width in the ISA. RISC-V V~\cite{rvv}
+leaves the width (\texttt{VLEN}) to each implementation and lets one binary run on any
+width through \texttt{vsetvli}. Three conventions are adopted here. The 128-bit
+register and the all-ones compare mask follow SSE, Neon and MSA. The vector--scalar
+form follows RISC-V V's \texttt{.vx} instructions. A full sum across lanes follows
+Neon's \texttt{ADDV} and RISC-V V's \texttt{vredsum}. x86 \texttt{PMADDWD} and
+MSA \texttt{DOTP\_S} only add products in pairs.
+
+\begin{table}[t]
+\centering
+\caption{SIMD instruction sets compared}
+\label{tab:isas}
+\footnotesize
+\begin{tabular}{lllll}
+\toprule
+ISA & Width & Regs & Int. elements & Sum across lanes \\
+\midrule
+SSE2 & 128 & 8/16 & 8--64 & pairs (\texttt{PMADDWD}) \\
+AVX2 & 256 & 16 & 8--64 & pairs (\texttt{VPMADDWD}) \\
+Neon (A64) & 128 & 32 & 8--64 & full (\texttt{ADDV}) \\
+MIPS MSA & 128 & 32 & 8--64 & pairs (\texttt{DOTP\_S}) \\
+RISC-V V & \texttt{VLEN} & 32 & 8--64 & full (\texttt{vredsum}) \\
+This work & 128 & 8 & 16 & full (\texttt{VDOT}) \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsection{Soft vector processors on FPGAs}
 FPGAs are a natural host for lane-replicated designs because the lane count can be
@@ -249,9 +280,15 @@ Verification works in layers:
       (through the debug port) and both counters with the golden model.
 \item \textbf{Program check.} The golden-model result is also compared with plain
       arithmetic (e.g.\ $C_i = A_i + B_i$), which catches errors in the programs.
+\item \textbf{Directed corner tests.} Hand-built programs exercise what the
+      benchmarks never do: writes to \texttt{s0}, address and PC wrap-around,
+      back-to-back loads, a branch into a load, a 32-bit scalar broadcast and
+      every unused op code.
+\item \textbf{Board check.} The FPGA top, with its block RAM and started only by
+      its power-on reset, must show the golden model's dot product on its LEDs.
 \item \textbf{Mutation tests.} Deliberately injected bugs (a logical instead of
-      arithmetic right shift, a mis-wired adder tree, a missing load stall) must
-      make the tests fail.
+      arithmetic right shift, a mis-wired adder tree, zero- instead of
+      sign-extension, a missing load stall) must make the tests fail.
 \end{enumerate}
 A sixth program, \texttt{isa\_test}, executes all 42 vector-ALU and reduce forms on
 random 16-bit data, so every instruction is exercised on the complete core.
@@ -269,8 +306,9 @@ reported. A Yosys estimate for the Xilinx Artix-7 xc7a35t (Basys-3) is also give
 
 \subsection{Verification}
 All unit tests pass, and all 24 system runs (6 programs $\times$ 4 lane counts)
-match the golden model exactly in memory contents, scalar registers, instruction
-count and cycle count. Every injected mutation was detected. Verilator lint
+and 8 directed runs match the golden model exactly in memory contents, scalar
+registers, instruction count and cycle count. The board version shows the correct
+dot product for every lane count. Every injected mutation was detected. Verilator lint
 (\texttt{-Wall}) reports no warnings for any module; the only two waivers mark
 bits that are unused on purpose. Continuous integration
 repeats the lint and tests on every change.
@@ -308,10 +346,10 @@ each design's measured ECP5 $F_{\max}$ is applied (orange).}
 
 \subsection{FPGA resources and frequency}
 Table~\ref{tab:fpga} and Fig.~\ref{fig:fpga} summarise the ECP5 results. Each lane
-adds one hardware multiplier and about 500 logic cells on average. Shared logic (control,
-scalar registers, memories) is paid once, so eight lanes need $4.8\times$ the logic
+adds one hardware multiplier and about 530 logic cells on average. Shared logic (control,
+scalar registers, memories) is paid once, so eight lanes need $4.9\times$ the logic
 of one. The register files are mapped to distributed LUT RAM, which keeps the
-flip-flop count low. On the Artix-7, Yosys estimates 3,698 LUTs (18\%) and 9 DSP
+flip-flop count low. On the Artix-7, Yosys estimates 3,704 LUTs (18\%) and 9 DSP
 slices for eight lanes.
 
 \begin{table}[t]
@@ -322,10 +360,10 @@ slices for eight lanes.
 \toprule
 $L$ & Logic cells & Mult. & BRAM & $F_{\max}$ (MHz) \\
 \midrule
-1 &   921 \,(3.8\%)  & 1 & 2 & 50.8 \\
-2 & 1,604 \,(6.6\%)  & 2 & 2 & 42.5 \\
-4 & 2,851 \,(11.7\%) & 4 & 3 & 37.5 \\
-8 & 4,418 \,(18.2\%) & 8 & 5 & 33.9 \\
+1 &   949 \,(3.9\%)  & 1 & 2 & 50.8 \\
+2 & 1,636 \,(6.7\%)  & 2 & 2 & 41.4 \\
+4 & 2,865 \,(11.8\%) & 4 & 3 & 37.1 \\
+8 & 4,650 \,(19.1\%) & 8 & 5 & 33.6 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -339,12 +377,12 @@ $L$ & Logic cells & Mult. & BRAM & $F_{\max}$ (MHz) \\
 \end{figure}
 
 \subsection{Discussion}
-The maximum frequency falls from \SI{50.8}{MHz} to \SI{33.9}{MHz} as the lanes go
+The maximum frequency falls from \SI{50.8}{MHz} to \SI{33.6}{MHz} as the lanes go
 from one to eight. Because the core executes each instruction in a single cycle, its
 critical path crosses the whole datapath: block-RAM output, decode, register read,
 multiplier, adder tree and scalar write-back. Wider designs also spread across
 more of the device, which lengthens routing. The wall-clock speed-up at eight lanes
-is therefore $7.89 \times 33.9/50.8 = 5.3\times$, not $7.9\times$. The result
+is therefore $7.89 \times 33.6/50.8 = 5.2\times$, not $7.9\times$. The result
 confirms the main promise of SIMD: near-linear gains in work per instruction. It
 also shows that a wider datapath must be pipelined to keep its clock rate. On a
 small Lattice iCE40 UP5K (5,280 cells), the 8-lane design did not fit even with its
@@ -361,25 +399,29 @@ eight DSP blocks in use. A mid-range device is the practical minimum.
 \toprule
 Member & Contribution \\
 \midrule
-Mahir (lead) & Architecture and ISA specification; vector control unit; core integration; system testbench; CI; documentation; report \\
-Krishiv Gupta & Lane ALU (14 operations) and parallel ALU array; ALU testbench with corner, random and coverage checks \\
+Mahir (lead) & Architecture and ISA; vector control unit; core integration; instruction-level golden model and workload runner; system testbench; CI; documentation; report \\
+Krishiv Gupta & Lane ALU (14 operations) and parallel ALU array; ALU testbench; FPGA wrapper and synthesis flow (ECP5 place-and-route, Artix-7, Vivado); resource and $F_{\max}$ analysis \\
 Abhiman Singh & Vector and scalar register files with debug port; register-file testbench \\
-Jayadeep & Lane multiplexers and result combiner (adder tree); combiner testbench for 1--8 lanes; FPGA wrapper and synthesis flow (ECP5, Artix-7, Vivado script) \\
-Ashish Kushwaha & Assembler, golden model and six workload programs; workload runner; scalar-versus-SIMD analysis and figures \\
+Jayadeep & Lane multiplexers and result combiner (adder tree); combiner testbench for 1--8 lanes; scalar-versus-SIMD performance analysis and figures \\
+Ashish Kushwaha & Assembler; the six workload programs; assembler tests \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \textbf{Mahir} defined the instruction format and the block interfaces that the rest
 of the team built against. He wrote the vector control unit, with its early
-instruction fetch and two-cycle load, and integrated the core. He also wrote the
-system testbench that compares memory, registers and cycle counts with the golden
-model, and set up the repository, continuous integration and documentation.
+instruction fetch and two-cycle load, and integrated the core. He wrote the
+instruction-level golden model that predicts results and exact cycle counts, the
+workload runner, and the system testbench that compares memory, registers and cycle
+counts with the model. He also set up the repository, continuous integration and
+documentation.
 
 \textbf{Krishiv Gupta} designed the lane ALU and its \texttt{generate}-based array,
-including the handling of signed and unsigned compares and arithmetic shifts. His
-testbench checks 225,496 lane results against an independent integer model and
-proves that no carry crosses a lane boundary.
+including signed and unsigned compares and arithmetic shifts. His testbench checks
+225,496 lane results against an independent integer model and proves that no carry
+crosses a lane boundary. He also built the FPGA wrapper and the synthesis flow that
+produced the ECP5 resource and frequency results, the Artix-7 estimate, and the
+Vivado script and Basys-3 constraints for the lab.
 
 \textbf{Abhiman Singh} designed the two register files: two read ports and one
 write port each, a hard-wired zero register, and the debug port that forms the
@@ -387,19 +429,19 @@ scalar interface. His testbench covers read-during-write behaviour and 4,000 ran
 cycles against a shadow model.
 
 \textbf{Jayadeep} designed the lane multiplexers and the result combiner's
-$\log_2 L$ adder tree, verified for every lane count. He built the FPGA wrapper and
-the synthesis flow that produced the resource and frequency results, including the
-Vivado script and Basys-3 constraints for the lab.
+$\log_2 L$ adder tree, verified for every lane count. He produced the
+scalar-versus-SIMD analysis: cycle counts for 1, 2, 4 and 8 lanes, speed-up,
+throughput and the figures.
 
-\textbf{Ashish Kushwaha} wrote the assembler, the instruction-level golden model and
-the six workload programs. He also wrote the runner that checks each program against
-plain arithmetic and against the RTL, and the scalar-versus-SIMD analysis and figures.
+\textbf{Ashish Kushwaha} wrote the two-pass assembler, with labels, constants and
+line-numbered error messages, and its tests. He also wrote the six workload programs,
+including the branch-free threshold kernel and the instruction-coverage program.
 
 % =============================================================================
 \section{Conclusion and Phase II Plan}
 The Phase~I prototype is complete and verified. An eight-lane, 128-bit SIMD unit
-executes a 22-instruction ISA, matches its golden model cycle for cycle, and reaches
-a $7.9\times$ cycle speed-up and a $5.3\times$ wall-clock speed-up over its own
+executes a 48-instruction ISA, matches its golden model cycle for cycle, and reaches
+a $7.9\times$ cycle speed-up and a $5.2\times$ wall-clock speed-up over its own
 scalar configuration on a mid-range FPGA. Phase~II will
 (i)~pipeline the core to raise $F_{\max}$ and recover wall-clock speed-up;
 (ii)~measure exact Artix-7 resources and timing in Vivado and run the design on a
@@ -411,14 +453,14 @@ Basys-3 board;
 % =============================================================================
 \begin{thebibliography}{99}
 
+\bibitem{hp6} J.~L. Hennessy and D.~A. Patterson, \emph{Computer Architecture: A
+Quantitative Approach}, 6th~ed. Cambridge, MA, USA: Morgan Kaufmann, 2017, ch.~4.
+
 \bibitem{flynn72} M.~J. Flynn, ``Some computer organizations and their effectiveness,''
 \emph{IEEE Trans. Comput.}, vol.~C-21, no.~9, pp.~948--960, Sep. 1972.
 
 \bibitem{cray1} R.~M. Russell, ``The CRAY-1 computer system,''
 \emph{Commun. ACM}, vol.~21, no.~1, pp.~63--72, Jan. 1978.
-
-\bibitem{hp6} J.~L. Hennessy and D.~A. Patterson, \emph{Computer Architecture: A
-Quantitative Approach}, 6th~ed. Cambridge, MA, USA: Morgan Kaufmann, 2017, ch.~4.
 
 \bibitem{mmx} A.~Peleg and U.~Weiser, ``MMX technology extension to the Intel
 architecture,'' \emph{IEEE Micro}, vol.~16, no.~4, pp.~42--50, Aug. 1996,
@@ -447,6 +489,16 @@ version~1.0, 2021. [Online]. Available: \url{https://github.com/riscv/riscv-v-sp
 ``Ara: A 1-GHz+ scalable and energy-efficient RISC-V vector processor with
 multiprecision floating-point support in 22-nm FD-SOI,'' \emph{IEEE Trans. Very
 Large Scale Integr. (VLSI) Syst.}, vol.~28, no.~2, pp.~530--543, Feb. 2020.
+
+\bibitem{intelsdm} Intel Corp., \emph{Intel 64 and IA-32 Architectures Software
+Developer's Manual}, vol.~2. [Online]. Available: \url{https://www.intel.com/sdm}.
+Accessed: Nov. 6, 2026.
+
+\bibitem{armarm} Arm Ltd., \emph{Arm Architecture Reference Manual for A-profile
+Architecture}. [Online]. Available: \url{https://developer.arm.com/documentation/ddi0487/latest}.
+Accessed: Nov. 6, 2026.
+
+\bibitem{msa} MIPS Technologies, ``MIPS SIMD Architecture,'' white paper, rev.~1.00, 2012.
 
 \bibitem{vespa} P.~Yiannacouras, J.~G. Steffan, and J.~Rose, ``VESPA: Portable,
 scalable, and flexible FPGA-based vector processors,'' in \emph{Proc. Int. Conf.
