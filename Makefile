@@ -1,7 +1,7 @@
 # =============================================================================
 # Makefile - one-word commands for the whole project
 # =============================================================================
-#   make test     lint + every unit testbench + Python checks + full-system runs
+#   make test     lint + unit testbenches + Python checks + full-system runs + board check
 #   make lint     check every Verilog file with Verilator
 #   make perf     scalar vs SIMD cycle counts for 1, 2, 4, 8 lanes -> results/perf.csv
 #   make syn      FPGA size and maximum clock speed            -> results/fpga_*.csv
@@ -17,9 +17,9 @@ BUILD    := build
 IVERILOG := iverilog -g2012 -I rtl -y rtl
 PLOT     := uv run --python 3.12 --with matplotlib python
 
-.PHONY: test lint unit pytest system perf syn plots report clean
+.PHONY: test lint unit pytest system board perf syn plots report clean
 
-test: lint unit pytest system
+test: lint unit pytest system board
 
 # ---- Lint: every module on its own, all warnings on ---------------------------
 lint:
@@ -65,6 +65,12 @@ endif
 system:
 ifneq ($(wildcard tb/tb_simd_core.v),)
 	python3 sw/run_workloads.py --lanes 1 8
+endif
+
+# ---- The FPGA version (fpga_top) gives the right answer from power-on ------------
+board:
+ifneq ($(wildcard rtl/fpga_top.v),)
+	python3 syn/run_syn.py --board-only
 endif
 
 # ---- Experiments ------------------------------------------------------------------
