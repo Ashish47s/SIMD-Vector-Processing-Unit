@@ -1,6 +1,6 @@
 # Instruction set
 
-The processor understands 22 kinds of instruction. Every instruction is one 32-bit word.
+The processor has 48 instructions: 14 ALU jobs, each in three forms (vector–vector, vector–scalar and reduce), plus 6 for memory, scalar maths and program flow. Every instruction is one 32-bit word.
 
 ## Registers
 
@@ -27,7 +27,7 @@ The top two opcode bits give the instruction class. For classes `00`, `01` and `
 | Class | Opcode | Meaning | Example |
 | --- | --- | --- | --- |
 | `00` vector–vector | `0x00`–`0x0D` | `vd[i] = va[i] op vb[i]` for every lane `i` | `VADD v3, v1, v2` |
-| `01` vector–scalar | `0x10`–`0x1D` | `vd[i] = va[i] op s[rb]`: the scalar is broadcast to every lane | `VMUL v3, v1, s2` |
+| `01` vector–scalar | `0x10`–`0x1D` | `vd[i] = va[i] op s[rb]`: the low 16 bits of the scalar are broadcast to every lane | `VMUL v3, v1, s2` |
 | `10` reduce | `0x20`–`0x2D` | `sd = Σ (va[i] op vb[i])` over all lanes | `VDOT s4, v1, v2` |
 | `11` memory, scalar, control | `0x30`–`0x3F` | see below | |
 
@@ -59,13 +59,19 @@ Comparisons write all ones (`0xFFFF`) for true, because that value works directl
 | Opcode | Instruction | Meaning | Cycles |
 | --- | --- | --- | --- |
 | `0x30` | `VLD vd, imm(sa)` | `vd = memory[sa + imm]` (one 128-bit word) | 2 |
-| `0x31` | `VST vb, imm(sa)` | `memory[sa + imm] = vb` | 1 |
+| `0x31` | `VST vb, imm(sa)` | `memory[sa + imm] = vb` (the stored register goes in the `rb` field; `rd` is unused) | 1 |
 | `0x38` | `ADDI sd, sa, imm` | `sd = sa + imm` | 1 |
 | `0x39` | `ADD sd, sa, sb` | `sd = sa + sb` | 1 |
-| `0x3C` | `BNE sa, sb, label` | if `sa ≠ sb`, jump to `label` | 1 |
+| `0x3C` | `BNE sa, sb, label` | if `sa ≠ sb`, jump to `label`; `imm` = label address − address of this `BNE` | 1 |
 | `0x3F` | `HALT` | stop | 1 |
 
 Every instruction except `VLD` takes one clock cycle. `VLD` takes two, because block RAM returns data one clock after it receives the address. Taken branches cost no extra cycle (see [architecture.md](architecture.md#timing)).
+
+## Wrap-around and unused op codes
+
+* **Addresses wrap.** `VLD` and `VST` use `(sa + imm)` modulo the data-memory size: 1,024 words in simulation, 512 on the FPGA. Address −1 is the last word.
+* **The program counter wraps.** After instruction 255 comes instruction 0, and a branch offset that goes below 0 or above 255 wraps the same way.
+* **Unused op codes.** `0x0E`, `0x0F`, `0x1E` and `0x1F` write 0 into `vd`; `0x2E` and `0x2F` write 0 into `sd`. Every other unused code in class `11` does nothing for one cycle. The assembler never produces these codes; the directed tests in `sw/directed_tests.py` check that the hardware and the golden model agree on them.
 
 ## Reduce mnemonics
 
