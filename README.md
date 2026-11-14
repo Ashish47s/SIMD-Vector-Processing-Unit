@@ -143,7 +143,7 @@ SIMD-Vector-Processing-Unit/
 ## Report and video
 
 - **Phase 1 report:** [`reports/Phase1_Report.pdf`](reports/Phase1_Report.pdf) (IEEE format; LaTeX source in [`reports/src`](reports/src))
-- **Prototype video:** link will be added here after recording
+- **Prototype video (4:51):** [watch on Google Drive](https://drive.google.com/file/d/1aqpSWyA0_Q8v4WhcD_3P8AJsQFPEuM7q/view?usp=drive_link)
 
 ## Roadmap
 
