@@ -15,21 +15,28 @@ completely separate description of the same behaviour.
 """
 
 ALU_OPS = ["ADD", "SUB", "AND", "OR", "XOR", "SLL", "SRL", "SRA",
-           "MUL", "SEQ", "SLT", "SLTU", "MIN", "MAX"]
+           "MUL", "SEQ", "SLT", "SLTU", "MIN", "MAX", "ADDS", "SUBS"]
 
 
-def to_signed(x, bits):
+def to_signed(x: int, bits: int) -> int:
     """Read a raw bit pattern as a signed number: 0xFFFF -> -1 for 16 bits."""
     x &= (1 << bits) - 1
     return x - (1 << bits) if x >> (bits - 1) else x
 
 
-def alu(op, a, b, w=16):
+def clamp(x: int, bits: int) -> int:
+    """Keep a number inside the signed range: for 16 bits, -32768 .. 32767.
+    This is what the saturating jobs ADDS and SUBS do instead of wrapping."""
+    low, high = -(1 << (bits - 1)), (1 << (bits - 1)) - 1
+    return max(low, min(high, x))
+
+
+def alu(op: int, a: int, b: int, w: int = 16) -> int:
     """What one lane computes. a and b are raw w-bit patterns."""
     mask = (1 << w) - 1
     sa, sb = to_signed(a, w), to_signed(b, w)
     shift = b % w
-    name = ALU_OPS[op] if op < len(ALU_OPS) else None
+    name = ALU_OPS[op] if op < len(ALU_OPS) else ""   # "" = unused op code, gives 0
     result = {
         "ADD": sa + sb,
         "SUB": sa - sb,
@@ -45,6 +52,8 @@ def alu(op, a, b, w=16):
         "SLTU": -1 if a < b else 0,
         "MIN": a if sa < sb else b,
         "MAX": b if sa < sb else a,
+        "ADDS": clamp(sa + sb, w),
+        "SUBS": clamp(sa - sb, w),
     }.get(name, 0)
     return result & mask
 

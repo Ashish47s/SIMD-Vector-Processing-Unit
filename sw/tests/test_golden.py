@@ -34,6 +34,15 @@ class GoldenModelTests(unittest.TestCase):
         self.assertEqual(golden.alu(sltu, 0xFFFF, 1), 0)         # 65535 > 1
         self.assertEqual(golden.alu(mul, 300, 300), 90000 & 0xFFFF)
 
+    def test_saturating_jobs(self):
+        adds, subs = golden.ALU_OPS.index("ADDS"), golden.ALU_OPS.index("SUBS")
+        self.assertEqual(golden.alu(adds, 0x7FFF, 1), 0x7FFF)       # 32767 + 1 sticks at 32767
+        self.assertEqual(golden.alu(adds, 0x8000, 0xFFFF), 0x8000)  # -32768 + -1 sticks at -32768
+        self.assertEqual(golden.alu(adds, 0xC000, 0xC000), 0x8000)  # -16384 * 2 just fits
+        self.assertEqual(golden.alu(subs, 0x8000, 1), 0x8000)       # -32768 - 1
+        self.assertEqual(golden.alu(subs, 0x7FFF, 0xFFFF), 0x7FFF)  # 32767 - (-1)
+        self.assertEqual(golden.alu(subs, 5, 7), 0xFFFE)            # no overflow: plain -2
+
     @needs_assembler
     def test_s0_stays_zero(self):
         model = golden.SimdModel(lanes=1)

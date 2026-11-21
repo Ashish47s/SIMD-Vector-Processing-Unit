@@ -9,12 +9,14 @@ the unusual cases, where bugs like to hide:
   * two loads in a row, a load right after a jump, a store then a load
   * a scalar wider than 16 bits broadcast to the lanes (only the low 16 bits count)
   * reduce instructions on compare results (each true lane adds -1)
-  * unused op codes (the vector ones write 0, the others do nothing)
+  * the saturating jobs ADDS and SUBS at their limits (32767 + 1 stays 32767)
+  * unused class-11 op codes (they do nothing)
   * BNE on numbers that differ only above bit 15 (it must compare all 32 bits)
   * VST, BNE and HALT with their unused fields filled in (no register may change)
   * instructions after HALT (they must never run)
 
-Some of these need op codes that the assembler refuses on purpose, so the
+Some of these need op codes that the assembler does not write (unused ones,
+and the saturating jobs, which are built straight from their numbers), so the
 programs are built here in Python. run_workloads.py runs each one on the golden
 model and on the RTL, for every lane count, and the two must agree exactly.
 Memory starts full of random numbers so every word is meaningful.
@@ -72,15 +74,21 @@ def corner_program():
             BNE  s7, s1, tgt
             VREDMAX s7, v1, v2
     """)
-    # Unused op codes with every field set, each followed by a store or add
-    # that makes its effect (or lack of one) visible.
-    extra = []
-    for opcode in (0x0E, 0x0F, 0x1E, 0x1F):          # unused vector jobs: write 0 to v6
+    # The saturating jobs (ADDS = job 14, SUBS = job 15) in all three forms,
+    # each followed by a store or add that makes the result visible. Memory is
+    # random, so many lanes go past the limits; s5 = 32767 broadcast to every
+    # lane pushes almost every lane over the edge.
+    extra = [vasm.assemble("ADDI s5, s0, 0x7FFF")[0]]
+    for opcode in (0x0E, 0x0F):                      # VADDS / VSUBS v6, v1, v2
         extra.append(vasm.encode(opcode, rd=6, ra=1, rb=2))
         extra.append(vasm.assemble(f"VST v6, {20 + len(extra)}(s0)")[0])
-    for opcode in (0x2E, 0x2F):                      # unused reduce jobs: write 0 to s3
+    for opcode in (0x1E, 0x1F):                      # VADDS / VSUBS v6, v1, s5
+        extra.append(vasm.encode(opcode, rd=6, ra=1, rb=5))
+        extra.append(vasm.assemble(f"VST v6, {20 + len(extra)}(s0)")[0])
+    for opcode in (0x2E, 0x2F):                      # VREDADDS / VREDSUBS s3, v1, v2
         extra.append(vasm.encode(opcode, rd=3, ra=1, rb=2))
         extra.append(vasm.assemble("ADD s4, s4, s3")[0])
+    # Unused class-11 op codes with every field set: each must do nothing.
     for opcode in (0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x3A, 0x3B, 0x3D, 0x3E):
         extra.append(vasm.encode(opcode, rd=5, ra=1, rb=2, imm=0x7FFF))   # must do nothing
     extra.append(vasm.assemble("VST v3, 40(s0)")[0])

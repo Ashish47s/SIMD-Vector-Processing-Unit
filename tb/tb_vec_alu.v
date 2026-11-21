@@ -9,7 +9,8 @@
 //      model (written differently from the RTL, using plain integer maths)
 //      and compare. Any difference is printed and counted as an error.
 //   4. At the end we print a coverage table: how many times each operation
-//      was checked, and whether its interesting cases were seen.
+//      was checked, and whether its interesting cases were seen (compares
+//      gave both true and false; saturating jobs both clamped and did not).
 //
 // Run:  make tb_vec_alu
 // =============================================================================
@@ -21,7 +22,7 @@ module tb_vec_alu;
 
     localparam LANES = 8;
     localparam W     = 16;
-    localparam NUM_OPS = 14;
+    localparam NUM_OPS = 16;
     localparam RANDOM_ROUNDS = 2000;     // random vectors per operation
 
     // ---- DUT ------------------------------------------------------------
@@ -35,6 +36,20 @@ module tb_vec_alu;
     // Uses 32-bit integers, then keeps the low W bits. Because it is written
     // in a different way from the RTL, a mistake in one will not hide the
     // same mistake in the other.
+    // Largest and smallest signed W-bit numbers, as plain integers.
+    localparam integer BIG   =  (1 << (W-1)) - 1;     //  32767
+    localparam integer SMALL = -(1 << (W-1));         // -32768
+
+    // Saturating jobs: push a too-big or too-small answer back to the edge.
+    function integer clamp;
+        input integer v;
+        begin
+            if (v > BIG)        clamp = BIG;
+            else if (v < SMALL) clamp = SMALL;
+            else                clamp = v;
+        end
+    endfunction
+
     function [W-1:0] model;
         input [3:0]   f;
         input [W-1:0] x, z;
@@ -58,6 +73,8 @@ module tb_vec_alu;
                 `ALU_SLTU: model = (ux <  uz) ? -1 : 0;
                 `ALU_MIN:  model = (sx <  sz) ? x : z;
                 `ALU_MAX:  model = (sx <  sz) ? z : x;
+                `ALU_ADDS: model = clamp(sx + sz);
+                `ALU_SUBS: model = clamp(sx - sz);
                 default:   model = 0;
             endcase
         end
@@ -70,6 +87,18 @@ module tb_vec_alu;
     integer op_checks [0:15];    // how many lane checks per operation
     integer op_true   [0:15];    // compare ops: times the answer was "true"
     integer op_false  [0:15];    // compare ops: times the answer was "false"
+    integer op_clamp  [0:15];    // saturating ops: times the answer had to be clamped
+
+    // Would the true answer of ADDS / SUBS fall outside the signed range?
+    function needs_clamp;
+        input [3:0]   f;
+        input [W-1:0] x, z;
+        integer v;
+        begin
+            v = (f == `ALU_ADDS) ? $signed(x) + $signed(z) : $signed(x) - $signed(z);
+            needs_clamp = (f == `ALU_ADDS || f == `ALU_SUBS) && (v > BIG || v < SMALL);
+        end
+    endfunction
 
     // Check all lanes of the current inputs against the model.
     task check_all_lanes;
@@ -84,6 +113,8 @@ module tb_vec_alu;
                 op_checks[op] = op_checks[op] + 1;
                 if (want == {W{1'b1}}) op_true[op]  = op_true[op]  + 1;
                 if (want == {W{1'b0}}) op_false[op] = op_false[op] + 1;
+                if (needs_clamp(op, a[lane*W +: W], b[lane*W +: W]))
+                    op_clamp[op] = op_clamp[op] + 1;
                 if (got !== want) begin
                     errors = errors + 1;
                     if (errors <= 10)
@@ -103,7 +134,7 @@ module tb_vec_alu;
         corner[3] = 16'h7FFF;  corner[4] = 16'h8000;  corner[5] = 16'h00FF;
         corner[6] = 16'h5555;  corner[7] = 16'hAAAA;
         for (i = 0; i < 16; i = i + 1) begin
-            op_checks[i] = 0; op_true[i] = 0; op_false[i] = 0;
+            op_checks[i] = 0; op_true[i] = 0; op_false[i] = 0; op_clamp[i] = 0;
         end
 
         $display("tb_vec_alu: %0d lanes x %0d bits", LANES, W);
@@ -159,29 +190,42 @@ module tb_vec_alu;
             end
         end
 
-        // ---- 5. Unused op codes must give zero -------------------------------
-        for (k = 14; k < 16; k = k + 1) begin
-            op = k;
-            a = {LANES{16'h1234}};
-            b = {LANES{16'h4321}};
-            check_all_lanes;
-        end
+        // ---- 5. Saturation, with the answers written out by hand ---------------
+        // The model above could share a misunderstanding with the RTL, so these
+        // answers are typed in directly. Lane 0 gets the pair, the other lanes 0.
+        hand_check(`ALU_ADDS, 16'h7FFF, 16'h0001, 16'h7FFF);   //  32767 + 1      -> stays  32767
+        hand_check(`ALU_ADDS, 16'h8000, 16'hFFFF, 16'h8000);   // -32768 + -1     -> stays -32768
+        hand_check(`ALU_ADDS, 16'h4000, 16'h4000, 16'h7FFF);   //  16384 + 16384  -> too big
+        hand_check(`ALU_ADDS, 16'hC000, 16'hC000, 16'h8000);   // -16384 + -16384 = -32768 exactly, fits
+        hand_check(`ALU_ADDS, 16'h7FFF, 16'h8000, 16'hFFFF);   //  32767 + -32768 = -1, fits
+        hand_check(`ALU_SUBS, 16'h8000, 16'h0001, 16'h8000);   // -32768 - 1      -> stays -32768
+        hand_check(`ALU_SUBS, 16'h7FFF, 16'hFFFF, 16'h7FFF);   //  32767 - (-1)   -> stays  32767
+        hand_check(`ALU_SUBS, 16'h0000, 16'h8000, 16'h7FFF);   //  0 - (-32768)   -> too big
+        hand_check(`ALU_SUBS, 16'h0005, 16'h0007, 16'hFFFE);   //  5 - 7 = -2, fits
 
         // ---- Coverage report ------------------------------------------------------
         $display("");
         // "true / false" only matters for the compare ops, so the others show "-".
         $display("  op   name   lane checks   true   false");
-        for (k = 0; k < NUM_OPS; k = k + 1)
+        for (k = 0; k < `ALU_ADDS; k = k + 1)
             if (k >= `ALU_SEQ && k <= `ALU_SLTU)
                 $display("  %2d   %-5s  %11d  %5d  %6d", k, op_name(k), op_checks[k],
                          op_true[k], op_false[k]);
             else
                 $display("  %2d   %-5s  %11d      -       -", k, op_name(k), op_checks[k]);
+        for (k = `ALU_ADDS; k <= `ALU_SUBS; k = k + 1)
+            $display("  %2d   %-5s  %11d  clamped %0d times", k, op_name(k), op_checks[k], op_clamp[k]);
         // Every compare op must have produced both answers at least once.
         for (k = `ALU_SEQ; k <= `ALU_SLTU; k = k + 1)
             if (op_true[k] == 0 || op_false[k] == 0) begin
                 errors = errors + 1;
                 $display("  COVERAGE HOLE: op %0d never produced both true and false", k);
+            end
+        // Every saturating op must have been seen both clamping and not clamping.
+        for (k = `ALU_ADDS; k <= `ALU_SUBS; k = k + 1)
+            if (op_clamp[k] == 0 || op_clamp[k] == op_checks[k]) begin
+                errors = errors + 1;
+                $display("  COVERAGE HOLE: op %0d never seen both clamping and not clamping", k);
             end
 
         $display("");
@@ -191,6 +235,23 @@ module tb_vec_alu;
         $finish;
     end
 
+    // One hand-checked case: lane 0 gets (x, z) and must give "want".
+    task hand_check;
+        input [3:0]   f;
+        input [W-1:0] x, z, want;
+        begin
+            op = f;
+            a = {{(LANES-1)*W{1'b0}}, x};
+            b = {{(LANES-1)*W{1'b0}}, z};
+            check_all_lanes;                   // the model must agree too
+            checks = checks + 1;
+            if (y[W-1:0] !== want) begin
+                errors = errors + 1;
+                $display("  HAND CHECK FAILED op=%0d a=%h b=%h got=%h want=%h", f, x, z, y[W-1:0], want);
+            end
+        end
+    endtask
+
     // Short names for the coverage table.
     function [8*5-1:0] op_name;
         input [3:0] f;
@@ -199,8 +260,8 @@ module tb_vec_alu;
             3: op_name = "OR";    4: op_name = "XOR";   5: op_name = "SLL";
             6: op_name = "SRL";   7: op_name = "SRA";   8: op_name = "MUL";
             9: op_name = "SEQ";  10: op_name = "SLT";  11: op_name = "SLTU";
-           12: op_name = "MIN";  13: op_name = "MAX";
-           default: op_name = "-";
+           12: op_name = "MIN";  13: op_name = "MAX";  14: op_name = "ADDS";
+           15: op_name = "SUBS";
         endcase
     endfunction
 
