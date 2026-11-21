@@ -1,6 +1,6 @@
 # Instruction set
 
-The processor has 48 instructions: 14 ALU jobs, each in three forms (vector–vector, vector–scalar and reduce), plus 6 for memory, scalar maths and program flow. Every instruction is one 32-bit word.
+The processor has 54 instructions: 16 ALU jobs, each in three forms (vector–vector, vector–scalar and reduce), plus 6 for memory, scalar maths and program flow. Every instruction is one 32-bit word.
 
 ## Registers
 
@@ -11,7 +11,7 @@ The processor has 48 instructions: 14 ALU jobs, each in three forms (vector–ve
 
 `s0` always reads as 0, and writes to it are ignored. That gives programs a free zero: `ADDI s1, s0, 5` means `s1 = 5`.
 
-All arithmetic is on **16-bit two's-complement integers**: −32768 to 32767. A result that does not fit wraps around (`32767 + 1 = −32768`), like a car odometer. There is no saturation and no error flag.
+All arithmetic is on **16-bit two's-complement integers**: −32768 to 32767. A result that does not fit wraps around (`32767 + 1 = −32768`), like a car odometer, except for the saturating jobs `ADDS` and `SUBS`, which stop at the edge (`32767 + 1 = 32767`). There is no error flag.
 
 ## Encoding
 
@@ -26,9 +26,9 @@ The top two opcode bits give the instruction class. For classes `00`, `01` and `
 
 | Class | Opcode | Meaning | Example |
 | --- | --- | --- | --- |
-| `00` vector–vector | `0x00`–`0x0D` | `vd[i] = va[i] op vb[i]` for every lane `i` | `VADD v3, v1, v2` |
-| `01` vector–scalar | `0x10`–`0x1D` | `vd[i] = va[i] op s[rb]`: the low 16 bits of the scalar are broadcast to every lane | `VMUL v3, v1, s2` |
-| `10` reduce | `0x20`–`0x2D` | `sd = Σ (va[i] op vb[i])` over all lanes | `VDOT s4, v1, v2` |
+| `00` vector–vector | `0x00`–`0x0F` | `vd[i] = va[i] op vb[i]` for every lane `i` | `VADD v3, v1, v2` |
+| `01` vector–scalar | `0x10`–`0x1F` | `vd[i] = va[i] op s[rb]`: the low 16 bits of the scalar are broadcast to every lane | `VMUL v3, v1, s2` |
+| `10` reduce | `0x20`–`0x2F` | `sd = Σ (va[i] op vb[i])` over all lanes | `VDOT s4, v1, v2` |
 | `11` memory, scalar, control | `0x30`–`0x3F` | see below | |
 
 The assembler picks class `00` or `01` from the third operand. A `v` register gives vector–vector; an `s` register gives vector–scalar.
@@ -51,6 +51,8 @@ The assembler picks class `00` or `01` from the third operand. A `v` register gi
 | 11 | `SLTU` | all ones if `a < b` (unsigned), else 0 |
 | 12 | `MIN` | smaller of `a`, `b` (signed) |
 | 13 | `MAX` | larger of `a`, `b` (signed) |
+| 14 | `ADDS` | `a + b`, clamped to −32768 … 32767 (saturating) |
+| 15 | `SUBS` | `a − b`, clamped to −32768 … 32767 (saturating) |
 
 Comparisons write all ones (`0xFFFF`) for true, because that value works directly as a mask: `VAND` with it keeps a lane and `VAND` with 0 clears it. Intel SSE and ARM NEON use the same convention.
 
@@ -71,7 +73,7 @@ Every instruction except `VLD` takes one clock cycle. `VLD` takes two, because b
 
 * **Addresses wrap.** `VLD` and `VST` use `(sa + imm)` modulo the data-memory size: 1,024 words, in simulation and on the FPGA. Address −1 is the last word.
 * **The program counter wraps.** After instruction 255 comes instruction 0, and a branch offset that goes below 0 or above 255 wraps the same way.
-* **Unused op codes.** `0x0E`, `0x0F`, `0x1E` and `0x1F` write 0 into `vd`; `0x2E` and `0x2F` write 0 into `sd`. Every other unused code in class `11` does nothing for one cycle. The assembler never produces these codes; the directed tests in `sw/directed_tests.py` check that the hardware and the golden model agree on them.
+* **Unused op codes.** Every unused code in class `11` does nothing for one cycle. The assembler never produces these codes; the directed tests in `sw/directed_tests.py` check that the hardware and the golden model agree on them. (In Phase 1, codes `0x0E`, `0x0F`, `0x1E`, `0x1F`, `0x2E` and `0x2F` were unused and wrote 0; they are now the saturating jobs.)
 * **Reset.** Reset starts the program again from address 0 and clears the halt flag and the two counters. It does not clear the registers or the data memory: the registers are zero only at power-up (the register files start at zero when the chip is programmed, which is the state the golden model starts from), and the memory keeps whatever the last run left in it. A program that relies on starting values should set them itself.
 
 ## Reduce mnemonics
