@@ -40,6 +40,31 @@ module vec_alu_lane #(
     // passed and clears it where it failed. SSE and ARM NEON do the same.
     wire [W-1:0] ALL_ONES = {W{1'b1}};
 
+    // ---- Saturating add and subtract (ADDS, SUBS) ----------------------------
+    // Normal ADD wraps around: 32767 + 1 gives -32768, like a car odometer.
+    // ADDS "sticks" at the edge instead: 32767 + 1 gives 32767, and
+    // -32768 - 1 gives -32768. Image and audio code wants this, so a very
+    // bright pixel stays white instead of flipping to black.
+    //
+    // How it works: do the sum with ONE extra bit, so it can never overflow.
+    // Copying the sign bit in front ({a[W-1], a}) widens a number without
+    // changing its value. If the top two bits of the wide answer differ, the
+    // answer did not fit in W bits; the very top bit then says which way it
+    // went: 0 = too big, 1 = too small.
+    wire [W:0] wide_sum  = {a[W-1], a} + {b[W-1], b};
+    wire [W:0] wide_diff = {a[W-1], a} - {b[W-1], b};
+
+    wire [W-1:0] BIGGEST  = {1'b0, {(W-1){1'b1}}};    // 0x7FFF =  32767
+    wire [W-1:0] SMALLEST = {1'b1, {(W-1){1'b0}}};    // 0x8000 = -32768
+
+    wire sum_too_far  = (wide_sum[W]  != wide_sum[W-1]);
+    wire diff_too_far = (wide_diff[W] != wide_diff[W-1]);
+
+    wire [W-1:0] sat_sum  = !sum_too_far  ? wide_sum[W-1:0]  :
+                            wide_sum[W]   ? SMALLEST : BIGGEST;
+    wire [W-1:0] sat_diff = !diff_too_far ? wide_diff[W-1:0] :
+                            wide_diff[W]  ? SMALLEST : BIGGEST;
+
     // ---- Pick the answer for the requested job ------------------------------
     always @(*) begin
         case (op)
@@ -57,7 +82,9 @@ module vec_alu_lane #(
             `ALU_SLTU: y = is_less_unsigned ? ALL_ONES : {W{1'b0}};
             `ALU_MIN:  y = is_less_signed   ? a : b;
             `ALU_MAX:  y = is_less_signed   ? b : a;
-            default:   y = {W{1'b0}};             // unused op codes give 0
+            `ALU_ADDS: y = sat_sum;
+            `ALU_SUBS: y = sat_diff;
+            default:   y = {W{1'b0}};             // never used: all 16 codes are listed
         endcase
     end
 

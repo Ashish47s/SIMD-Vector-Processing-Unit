@@ -52,6 +52,8 @@
 `define ALU_SLTU  4'd11   // a <  b (unsigned) -> all ones, else 0
 `define ALU_MIN   4'd12   // smaller of a, b (signed)
 `define ALU_MAX   4'd13   // larger of a, b (signed)
+`define ALU_ADDS  4'd14   // a + b, but stops at the largest/smallest number (saturating)
+`define ALU_SUBS  4'd15   // a - b, but stops at the largest/smallest number (saturating)
 
 // ---- Class 11 opcodes: memory, scalar maths, program flow -------------------
 `define OP_VLD    6'h30   // VLD  vd, imm(sa)    vd = memory[sa + imm]
