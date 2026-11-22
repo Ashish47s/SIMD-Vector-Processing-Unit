@@ -117,15 +117,25 @@ module simd_core #(
     // A load writes memory data; everything else writes the lane results.
     wire [LANES*W-1:0] vreg_wdata = vreg_from_mem ? dmem_rdata : vector_result;
 
+    // For now every write changes all lanes and the lane mask is not used;
+    // masked instructions are connected up with the Phase 2 core.
+    /* verilator lint_off UNUSEDSIGNAL */
+    wire [LANES-1:0] lane_mask;
+    /* verilator lint_on UNUSEDSIGNAL */
+
     vec_regfile #(.LANES(LANES), .W(W)) u_vregs (
-        .clk         (clk),
-        .read_addr_a (ra),
-        .read_data_a (va),
-        .read_addr_b (rb),
-        .read_data_b (vb),
-        .write_en    (vreg_write),
-        .write_addr  (rd),
-        .write_data  (vreg_wdata)
+        .clk             (clk),
+        .read_addr_a     (ra),
+        .read_data_a     (va),
+        .read_addr_b     (rb),
+        .read_data_b     (vb),
+        .write_en        (vreg_write),
+        .write_lanes     ({LANES{1'b1}}),
+        .write_addr      (rd),
+        .write_data      (vreg_wdata),
+        .mask            (lane_mask),
+        .mask_write_en   (1'b0),
+        .mask_write_data ({LANES{1'b1}})
     );
 
     lane_mux #(.LANES(LANES), .W(W)) u_lane_mux (
