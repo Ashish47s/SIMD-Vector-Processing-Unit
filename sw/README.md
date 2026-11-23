@@ -4,7 +4,7 @@ Writing programs as raw 32-bit numbers is slow and error-prone, and the hardware
 
 | File | What it is |
 | --- | --- |
-| [`vasm.py`](vasm.py) | The **assembler**. It turns text like `VADD v3, v1, v2` into the 32-bit words the hardware runs. Labels, comments and constants such as `ITER` or `B+1` are allowed; constants may only use whole numbers, names and plain arithmetic, so a program can never run other code. It reports mistakes with the line number. |
+| [`vasm.py`](vasm.py) | The **assembler**. It turns text like `VADD v3, v1, v2` into the 32-bit words the hardware runs. Labels, comments and constants such as `ITER` or `B+1` are allowed; constants may only use whole numbers, names and plain arithmetic, so a program can never run other code. It reports mistakes with the line number. Phase 2 adds the saturating jobs (`VADDS`, `VSUBS`, `VREDADDS`, `VREDSUBS`), the `.M` ending that makes any vector or reduce instruction masked (`VADD.M v3, v1, v2` sets bit 16), and `VMSK va`, which sets the lane mask. |
 | [`golden.py`](golden.py) | The **golden model**: a Python description of what every instruction does. It runs the same machine code and predicts the final memory, the registers, the instruction count and the exact cycle count. |
 | [`run_workloads.py`](run_workloads.py) | Runs every workload on the golden model and on the Verilog core, checks both, and writes the cycle counts to `results/perf.csv`. |
 | [`directed_tests.py`](directed_tests.py) | Small hand-built programs for the corner cases (wrap-around, unused op codes, branches on high bits, code after `HALT`). |
@@ -24,7 +24,10 @@ Each benchmark processes N = 256 random sixteen-bit numbers, over the full range
 | [`relu.s`](programs/relu.s) | `Y[i] = max(X[i], 0)` | The activation function of most neural networks. |
 | [`threshold.s`](programs/threshold.s) | `Y[i] = X[i] if X[i] ≥ T else 0` | An `if` without a branch: compare, flip the mask, AND. |
 | [`dot.s`](programs/dot.s) | `Σ A[i]·B[i]` | Uses `VDOT`: multiply in the lanes, add up in the result combiner. Each product keeps its low 16 bits, as with `VMUL`. |
-| [`isa_test.s`](programs/isa_test.s) | every instruction | Coverage: all 14 ALU jobs in all three forms on random data. |
+| [`isa_test.s`](programs/isa_test.s) | every instruction | Coverage: all 16 ALU jobs in all three forms on random data, plus `VMSK` and masked vector, vector-scalar and reduce instructions. The FPGA build loads it, so no instruction's logic can be optimised away. |
+| [`brighten.s`](programs/brighten.s) | `Y[i] = X[i] + K`, clamped | Phase 2. Saturating add: the brightest pixels stay at 32,767 instead of wrapping to a large negative number. |
+| [`abs.s`](programs/abs.s) | `Y[i] = \|X[i]\|` | Phase 2. A lane mask built from a compare (`VSLT`, `VMSK`), then a masked `VSUBS.M` changes only the negative lanes. Saturation makes `\|−32768\|` give 32,767. |
+| [`sumpos.s`](programs/sumpos.s) | `Σ X[i]` over `X[i] > 0` | Phase 2. A masked reduce (`VREDADD.M`): the result combiner adds only the switched-on lanes, with no branch. |
 
 ## Commands
 
