@@ -14,7 +14,14 @@ into instruction memory with $readmemh.
 Instruction layout (same as rtl/simd_defs.vh):
 
     bits 31-26  opcode     bits 25-23  rd     bits 22-20  ra
-    bits 19-17  rb         bits 15-0   imm (signed 16-bit constant)
+    bits 19-17  rb         bit  16     m (masked)
+    bits 15-0   imm (signed 16-bit constant)
+
+Phase 2 additions:
+    VADDS / VSUBS ...      saturating add and subtract (ALU jobs 14 and 15)
+    VADD.M v3, v1, v2      ".M" on any vector or reduce instruction sets bit 16:
+                           only the lanes switched on in the lane mask take part
+    VMSK v2                new lane mask: lane i is on where v2[i] is not zero
 
 Usage:
     python3 sw/vasm.py program.s -o program.hex -D LANES=8 -D ITER=32
@@ -28,10 +35,11 @@ import sys
 
 # ALU jobs, in the same order as the ALU_* codes in rtl/simd_defs.vh.
 ALU_OPS = ["ADD", "SUB", "AND", "OR", "XOR", "SLL", "SRL", "SRA",
-           "MUL", "SEQ", "SLT", "SLTU", "MIN", "MAX"]
+           "MUL", "SEQ", "SLT", "SLTU", "MIN", "MAX", "ADDS", "SUBS"]
 
 # Opcodes of class 11 (memory, scalar maths, program flow).
 OP_VLD, OP_VST = 0x30, 0x31
+OP_VMSK = 0x34
 OP_ADDI, OP_ADD = 0x38, 0x39
 OP_BNE, OP_HALT = 0x3C, 0x3F
 
@@ -45,11 +53,13 @@ class AsmError(Exception):
     """A mistake in the program text, reported with its line number."""
 
 
-def encode(opcode, rd=0, ra=0, rb=0, imm=0):
-    """Pack the fields into one 32-bit instruction word."""
+def encode(opcode, rd=0, ra=0, rb=0, imm=0, masked=False):
+    """Pack the fields into one 32-bit instruction word.
+    masked=True sets bit 16, the "only the switched-on lanes" flag."""
     if not -32768 <= imm <= 32767:
         raise AsmError(f"constant {imm} does not fit in 16 bits")
-    return (opcode << 26) | (rd << 23) | (ra << 20) | (rb << 17) | (imm & 0xFFFF)
+    return ((opcode << 26) | (rd << 23) | (ra << 20) | (rb << 17)
+            | (int(masked) << 16) | (imm & 0xFFFF))
 
 
 def reg(text, kind):
@@ -161,7 +171,13 @@ def assemble_one(line, address, symbols):
 
     def need(count):
         if len(args) != count:
-            raise AsmError(f"{name} needs {count} operands, got {len(args)}")
+            raise AsmError(f"{name} needs {count} operand{'' if count == 1 else 's'}, got {len(args)}")
+
+    # A ".M" ending means "masked": only lanes switched on in the lane mask
+    # take part. It is allowed on vector and reduce instructions only.
+    masked = name.endswith(".M")
+    if masked:
+        name = name[:-2]
 
     # Vector ALU:  VADD vd, va, vb   (vector)   or   VADD vd, va, sb   (broadcast scalar)
     if name.startswith("V") and name[1:] in ALU_OPS:
@@ -170,7 +186,7 @@ def assemble_one(line, address, symbols):
         third_is_scalar = args[2].strip().lower().startswith("s")
         opclass = CLASS_VX if third_is_scalar else CLASS_VV
         return encode(opclass | func, reg(args[0], "v"), reg(args[1], "v"),
-                      reg(args[2], "s" if third_is_scalar else "v"))
+                      reg(args[2], "s" if third_is_scalar else "v"), masked=masked)
 
     # Reduce:  VREDADD sd, va, vb  (sum of va[i] + vb[i]);  VDOT = VREDMUL
     if name == "VDOT":
@@ -178,7 +194,16 @@ def assemble_one(line, address, symbols):
     if name.startswith("VRED") and name[4:] in ALU_OPS:
         need(3)
         func = ALU_OPS.index(name[4:])
-        return encode(CLASS_RED | func, reg(args[0], "s"), reg(args[1], "v"), reg(args[2], "v"))
+        return encode(CLASS_RED | func, reg(args[0], "s"), reg(args[1], "v"), reg(args[2], "v"),
+                      masked=masked)
+
+    # Everything below works on whole registers, so ".M" makes no sense there.
+    if masked:
+        raise AsmError(f"{name} cannot be masked (only vector and reduce instructions can)")
+
+    if name == "VMSK":                # VMSK va   (new lane mask: on where va is not zero)
+        need(1)
+        return encode(OP_VMSK, ra=reg(args[0], "v"))
 
     if name == "VLD":                 # VLD vd, offset(sa)
         need(2)
