@@ -27,6 +27,13 @@ class AssemblerTests(unittest.TestCase):
             "VDOT s4, v1, v2":  0xA2140000,   # opcode 0x28 (reduce MUL)
             "VST v3, 512(s1)":  0xC4160200,   # opcode 0x31, ra = 1, rb = 3 (store data), imm = 512
             "HALT":             0xFC000000,
+            # Phase 2
+            "VADDS v3, v1, v2":   0x39940000,   # opcode 0x0E (vector-vector ADDS)
+            "VSUBS v1, v1, s3":   0x7C960000,   # opcode 0x1F (vector-scalar SUBS)
+            "VREDADDS s2, v1, v2": 0xB9140000,  # opcode 0x2E (reduce ADDS)
+            "VSUBS.M v1, v3, v1": 0x3CB30000,   # opcode 0x0F, bit 16 = masked
+            "VDOT.M s4, v1, v2":  0xA2150000,   # opcode 0x28, bit 16 = masked
+            "VMSK v2":            0xD0200000,   # opcode 0x34, ra = 2
         }
         for text, want in cases.items():
             with self.subTest(text=text):
@@ -44,9 +51,16 @@ class AssemblerTests(unittest.TestCase):
         word = vasm.assemble("VST v3, OUT+2*STRIDE(s1)", {"OUT": 64, "STRIDE": 32})[0]
         self.assertEqual(word & 0xFFFF, 128)
 
+    def test_unmasked_never_sets_bit_16(self):
+        # Phase 1 programs must assemble exactly as before: bit 16 stays 0.
+        for text in ["VADD v3, v1, v2", "VMUL v1, v1, s3", "VDOT s4, v1, v2", "VMSK v2"]:
+            with self.subTest(text=text):
+                self.assertEqual(vasm.assemble(text)[0] & 0x10000, 0)
+
     def test_mistakes_are_reported(self):
         for bad in ["VADD v3, v1", "VADD v9, v1, v2", "ADDI s1, s0, 40000",
-                    "FOO v1", "VLD v1, A", "VDOT v4, v1, v2"]:
+                    "FOO v1", "VLD v1, A", "VDOT v4, v1, v2",
+                    "VLD.M v1, 0(s1)", "HALT.M", "VMSK s2", "VMSK v1, v2", "VFOO.M v1, v2, v3"]:
             with self.subTest(bad=bad), self.assertRaises(vasm.AsmError):
                 vasm.assemble(bad, {"A": 0})
 
@@ -64,7 +78,8 @@ class AssemblerTests(unittest.TestCase):
         self.assertEqual(vasm.assemble("ADDI s1, s0, N//3", {"N": 8})[0] & 0xFFFF, 2)
 
     def test_every_program_assembles(self):
-        symbols = dict(A=0, B=256, C=512, X=0, Y=256, OUT=64, STRIDE=32, ITER=32, ALPHA=3, LIMIT=100)
+        symbols = dict(A=0, B=256, C=512, X=0, Y=256, OUT=64, STRIDE=32, ITER=32, ALPHA=3, LIMIT=100,
+                       K=2000)
         for path in sorted(PROGRAMS.glob("*.s")):
             with self.subTest(program=path.name):
                 words = vasm.assemble(path.read_text(), symbols)
