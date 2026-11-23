@@ -27,6 +27,13 @@
 // LANES is a parameter. With LANES = 1 this exact design becomes an ordinary
 // one-number-at-a-time (scalar) processor. That is our fair baseline: same
 // instructions, same program, only the number of lanes changes.
+//
+// Phase 2 connections (this PR):
+//   * lane_enable is tied to all-ones so every lane contributes to sum_result.
+//     The pipelined core (Mahir's work) will drive it from the lane mask when
+//     the VMSK instruction is implemented.
+//   * lane_flags is captured on a local wire; it is not yet consumed because
+//     VMSK has not been implemented in the control unit yet.
 // =============================================================================
 
 module simd_core #(
@@ -152,10 +159,20 @@ module simd_core #(
         .y  (alu_out)
     );
 
+    // ---- Result combiner -------------------------------------------------------
+    // lane_enable: all lanes on for the single-cycle core.
+    // lane_flags:  connected to a local wire; will be used by VMSK in the
+    //              pipelined core. Suppress the unused-signal warning until then.
+    /* verilator lint_off UNUSEDSIGNAL */
+    wire [LANES-1:0] combiner_flags;
+    /* verilator lint_on UNUSEDSIGNAL */
+
     result_combiner #(.LANES(LANES), .W(W)) u_combiner (
         .lane_results  (alu_out),
+        .lane_enable   ({LANES{1'b1}}),   // all lanes on; pipelined core will use lane_mask
         .vector_result (vector_result),
-        .sum_result    (sum_result)
+        .sum_result    (sum_result),
+        .lane_flags    (combiner_flags)
     );
 
     // ---- Data memory connections ---------------------------------------------
@@ -166,7 +183,7 @@ module simd_core #(
 
     // ---- Performance counters --------------------------------------------------
     // These let us measure speed-up: run the same program with LANES = 1 and
-    // LANES = 8 and compare the cycle counts.
+    // LANES = 8 and compare the cycle counts.\
     always @(posedge clk) begin
         if (rst) begin
             cycle_count <= 32'd0;
